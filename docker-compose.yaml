@@ -13,6 +13,12 @@ services:
       - ./auth-api/api:/var/www/html
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   auth-db:
     image: postgres:15
@@ -27,6 +33,11 @@ services:
       - ./auth-api/base_query.sql:/docker-entrypoint-initdb.d/base_query.sql
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authuser -d authdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
 
   auth-redis:
     image: redis:7-alpine
@@ -36,6 +47,11 @@ services:
       - auth_redis_data:/data
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   # Messageria Services
   messageria-app:
@@ -53,6 +69,12 @@ services:
       - RABBITMQ_PORT=5672
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:3000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   messageria-redis:
     image: redis:alpine
@@ -63,6 +85,11 @@ services:
     restart: unless-stopped
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
@@ -76,6 +103,44 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  message-worker:
+    build: ./messageria_express
+    command: node workers/messageWorker.js
+    depends_on:
+      - messageria-redis
+      - rabbitmq
+    environment:
+      - REDIS_HOST=messageria-redis
+      - REDIS_PORT=6379
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+    networks:
+      - app-network
+
+# Record API Services
+  record-api:
+    build: ./record-api
+    ports:
+      - "8000:8000"
+    depends_on:
+      auth-db:
+        condition: service_healthy
+    environment:
+      - DATABASE_URL=postgres://authuser:authpass@auth-db:5432/authdb
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 networks:
   app-network:
@@ -86,3 +151,4 @@ volumes:
   auth_redis_data:
   messageria_redis_data:
   rabbitmq_data: 
+  record_pgdata:
